@@ -1,0 +1,221 @@
+'use client'
+
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { Settings, Maximize2, Minimize2, CameraOff, Copy, Check } from 'lucide-react'
+import { useWebcam } from '@/hooks/useWebcam'
+import { useSenderRTC } from '@/hooks/useSenderRTC'
+import { useTunnel } from '@/hooks/useTunnel'
+import SettingsPanel from './SettingsPanel'
+
+interface Props {
+  initialPin: string
+}
+
+export default function SenderApp({ initialPin }: Props) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const { videoRef, streamRef, isActive, error, settings, devices, start, updateSettings } = useWebcam()
+  const { status: rtcStatus, startStreaming, stopStreaming, replaceStream, setQuality } = useSenderRTC()
+  const { tunnel, startTunnel, stopTunnel } = useTunnel()
+
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [showControls, setShowControls] = useState(true)
+  const [isLive, setIsLive] = useState(false)
+  const [pin, setPin] = useState(initialPin)
+  const [copied, setCopied] = useState(false)
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Start webcam on mount
+  useEffect(() => { start() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fullscreen listener
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', handler)
+    return () => document.removeEventListener('fullscreenchange', handler)
+  }, [])
+
+  // Auto-hide controls in fullscreen
+  const revealControls = useCallback(() => {
+    setShowControls(true)
+    if (!isFullscreen) return
+    if (hideTimer.current) clearTimeout(hideTimer.current)
+    hideTimer.current = setTimeout(() => setShowControls(false), 3000)
+  }, [isFullscreen])
+
+  useEffect(() => {
+    if (!isFullscreen) {
+      setShowControls(true)
+      if (hideTimer.current) clearTimeout(hideTimer.current)
+    }
+  }, [isFullscreen])
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      containerRef.current?.requestFullscreen()
+    } else {
+      document.exitFullscreen()
+    }
+  }
+
+  const handleGoLive = async () => {
+    if (isLive) {
+      await stopStreaming()
+      setIsLive(false)
+    } else {
+      if (streamRef.current) {
+        await startStreaming(streamRef.current)
+        setIsLive(true)
+      }
+    }
+  }
+
+  const handleSettingsChange = async (patch: Parameters<typeof updateSettings>[0]) => {
+    const newStream = await updateSettings(patch)
+    if (newStream && isLive) await replaceStream(newStream)
+    if (patch.quality) await setQuality(patch.quality)
+  }
+
+  const handleRegeneratePin = async () => {
+    const res = await fetch('/api/pin/generate', { method: 'POST' })
+    if (res.ok) {
+      const { pin: newPin } = await res.json()
+      setPin(newPin)
+    }
+  }
+
+  const copyLink = () => {
+    if (!tunnel.url) return
+    navigator.clipboard.writeText(`${tunnel.url}/view`).catch(() => {})
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const statusColor: Record<typeof rtcStatus, string> = {
+    idle: 'text-zinc-500',
+    connecting: 'text-yellow-400',
+    connected: 'text-green-400',
+    disconnected: 'text-red-400',
+  }
+
+  const statusLabel: Record<typeof rtcStatus, string> = {
+    idle: '',
+    connecting: 'Waiting for viewer…',
+    connected: 'Viewer connected',
+    disconnected: 'Viewer disconnected',
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative w-screen h-screen bg-black overflow-hidden select-none cursor-default"
+      onMouseMove={revealControls}
+    >
+      {/* Video feed */}
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        className="w-full h-full object-contain"
+      />
+
+      {/* No camera state */}
+      {!isActive && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <CameraOff size={48} className="text-zinc-700 mb-4" />
+          <p className="text-zinc-500 text-sm mb-1">{error ?? 'No camera'}</p>
+          <button
+            onClick={() => start()}
+            className="mt-3 px-4 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm rounded-md transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {/* Controls overlay */}
+      <div
+        className={`absolute inset-0 pointer-events-none transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0'}`}
+      >
+        {/* Top bar */}
+        <div className="absolute top-0 left-0 right-0 px-4 pt-4 pb-10 bg-gradient-to-b from-black/80 to-transparent flex items-start justify-between pointer-events-auto">
+          <div className="flex items-center gap-3">
+            <span className="text-white/90 text-sm font-bold tracking-wide">CAM STREAM</span>
+            {isLive && (
+              <span className="flex items-center gap-1.5 bg-red-600 px-2 py-0.5 rounded text-white text-xs font-bold">
+                <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
+                LIVE
+              </span>
+            )}
+            {isLive && rtcStatus !== 'idle' && (
+              <span className={`text-xs ${statusColor[rtcStatus]}`}>
+                {statusLabel[rtcStatus]}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="p-2 text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+              title="Settings"
+            >
+              <Settings size={20} />
+            </button>
+            <button
+              onClick={toggleFullscreen}
+              className="p-2 text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+              title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            >
+              {isFullscreen ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
+            </button>
+          </div>
+        </div>
+
+        {/* Bottom bar */}
+        <div className="absolute bottom-0 left-0 right-0 px-4 pt-10 pb-4 bg-gradient-to-t from-black/80 to-transparent flex items-end justify-between pointer-events-auto">
+          {/* Left: settings summary */}
+          <div className="text-xs text-white/50 space-y-0.5">
+            <div>{settings.resolution} · {settings.fps}fps · {settings.quality}</div>
+            {tunnel.url && (
+              <div className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 bg-green-400 rounded-full" />
+                <span className="font-mono text-white/40 text-[10px]">{tunnel.url.replace('https://', '')}</span>
+                <button onClick={copyLink} className="text-white/40 hover:text-white/80 transition-colors">
+                  {copied ? <Check size={10} /> : <Copy size={10} />}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Right: go live button */}
+          <button
+            onClick={handleGoLive}
+            disabled={!isActive}
+            className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+              isLive
+                ? 'bg-red-600 hover:bg-red-500 text-white'
+                : 'bg-blue-600 hover:bg-blue-500 text-white'
+            }`}
+          >
+            {isLive ? 'Stop Stream' : 'Go Live'}
+          </button>
+        </div>
+      </div>
+
+      {/* Settings drawer */}
+      <SettingsPanel
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        settings={settings}
+        onSettingsChange={handleSettingsChange}
+        devices={devices}
+        pin={pin}
+        onRegeneratePin={handleRegeneratePin}
+        tunnel={tunnel}
+        onStartTunnel={startTunnel}
+        onStopTunnel={stopTunnel}
+      />
+    </div>
+  )
+}
