@@ -2,11 +2,7 @@
 
 import { useRef, useState, useCallback, useEffect } from 'react'
 import { QUALITY_BITRATES, type Quality } from './useWebcam'
-
-const ICE_SERVERS = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-]
+import { getIceServers } from '@/lib/ice'
 
 export type RTCStatus = 'idle' | 'connecting' | 'connected' | 'disconnected'
 
@@ -26,7 +22,7 @@ export function useSenderRTC() {
     cleanup()
     setStatus('connecting')
 
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+    const pc = new RTCPeerConnection({ iceServers: getIceServers() })
     pcRef.current = pc
 
     stream.getTracks().forEach(track => pc.addTrack(track, stream))

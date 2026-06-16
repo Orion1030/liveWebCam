@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { Settings, Maximize2, Minimize2, CameraOff, Copy, Check } from 'lucide-react'
 import { useWebcam } from '@/hooks/useWebcam'
-import { useSenderRTC } from '@/hooks/useSenderRTC'
+import { useSenderWS } from '@/hooks/useSenderWS'
 import { useTunnel } from '@/hooks/useTunnel'
 import SettingsPanel from './SettingsPanel'
 
@@ -14,7 +14,7 @@ interface Props {
 export default function SenderApp({ initialPin }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const { videoRef, streamRef, isActive, error, settings, devices, start, updateSettings } = useWebcam()
-  const { status: rtcStatus, startStreaming, stopStreaming, replaceStream, setQuality } = useSenderRTC()
+  const { status: wsStatus, start: wsStart, stop: wsStop, updateConfig } = useSenderWS()
   const { tunnel, startTunnel, stopTunnel } = useTunnel()
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
@@ -60,11 +60,11 @@ export default function SenderApp({ initialPin }: Props) {
 
   const handleGoLive = async () => {
     if (isLive) {
-      await stopStreaming()
+      wsStop()
       setIsLive(false)
     } else {
       if (streamRef.current) {
-        await startStreaming(streamRef.current)
+        await wsStart(streamRef.current, settings)
         setIsLive(true)
       }
     }
@@ -72,8 +72,13 @@ export default function SenderApp({ initialPin }: Props) {
 
   const handleSettingsChange = async (patch: Parameters<typeof updateSettings>[0]) => {
     const newStream = await updateSettings(patch)
-    if (newStream && isLive) await replaceStream(newStream)
-    if (patch.quality) await setQuality(patch.quality)
+    if (newStream && isLive) {
+      // Camera device or resolution changed — restart encoding with new stream
+      await wsStart(newStream, { ...settings, ...patch })
+    } else if (isLive) {
+      // Quality or FPS only — reconfigure encoder in-place, no reconnect needed
+      updateConfig({ ...settings, ...patch })
+    }
   }
 
   const handleRegeneratePin = async () => {
@@ -91,18 +96,16 @@ export default function SenderApp({ initialPin }: Props) {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const statusColor: Record<typeof rtcStatus, string> = {
+  const statusColor: Record<typeof wsStatus, string> = {
     idle: 'text-zinc-500',
-    connecting: 'text-yellow-400',
-    connected: 'text-green-400',
-    disconnected: 'text-red-400',
+    live: 'text-green-400',
+    error: 'text-red-400',
   }
 
-  const statusLabel: Record<typeof rtcStatus, string> = {
+  const statusLabel: Record<typeof wsStatus, string> = {
     idle: '',
-    connecting: 'Waiting for viewer…',
-    connected: 'Viewer connected',
-    disconnected: 'Viewer disconnected',
+    live: 'Streaming',
+    error: 'Stream error',
   }
 
   return (
@@ -148,9 +151,9 @@ export default function SenderApp({ initialPin }: Props) {
                 LIVE
               </span>
             )}
-            {isLive && rtcStatus !== 'idle' && (
-              <span className={`text-xs ${statusColor[rtcStatus]}`}>
-                {statusLabel[rtcStatus]}
+            {isLive && wsStatus !== 'idle' && (
+              <span className={`text-xs ${statusColor[wsStatus]}`}>
+                {statusLabel[wsStatus]}
               </span>
             )}
           </div>

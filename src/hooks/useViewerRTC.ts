@@ -1,11 +1,7 @@
 'use client'
 
 import { useRef, useState, useCallback, useEffect } from 'react'
-
-const ICE_SERVERS = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-]
+import { getIceServers } from '@/lib/ice'
 
 export type ViewerStatus = 'idle' | 'connecting' | 'connected' | 'no-stream' | 'failed'
 
@@ -34,7 +30,7 @@ export function useViewerRTC() {
     const handleOffer = async (offerData: RTCSessionDescriptionInit) => {
       if (pc) { pc.close() }
 
-      pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+      pc = new RTCPeerConnection({ iceServers: getIceServers() })
       pcRef.current = pc
 
       pc.ontrack = (e) => {
