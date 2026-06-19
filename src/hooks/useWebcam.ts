@@ -4,11 +4,15 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 
 export type Quality = 'ultra' | 'high' | 'medium' | 'low'
 
+export type VideoCodec = 'vp8' | 'h264'
+
 export interface StreamSettings {
   resolution: string
   fps: number
   quality: Quality
   deviceId: string | undefined
+  keyframeOnly: boolean
+  codec: VideoCodec
 }
 
 const RESOLUTIONS: Record<string, { width: number; height: number }> = {
@@ -31,11 +35,27 @@ const DEFAULT_SETTINGS: StreamSettings = {
   fps: 30,
   quality: 'high',
   deviceId: undefined,
+  keyframeOnly: false,
+  codec: 'vp8',
 }
 
 async function listVideoDevices(): Promise<MediaDeviceInfo[]> {
   const all = await navigator.mediaDevices.enumerateDevices()
   return all.filter(d => d.kind === 'videoinput')
+}
+
+const SETTINGS_KEY = 'stream-settings'
+
+function loadSettings(): StreamSettings {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY)
+    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) }
+  } catch {}
+  return DEFAULT_SETTINGS
+}
+
+function saveSettings(s: StreamSettings) {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)) } catch {}
 }
 
 export function useWebcam() {
@@ -45,6 +65,11 @@ export function useWebcam() {
   const [error, setError] = useState<string | null>(null)
   const [settings, setSettings] = useState<StreamSettings>(DEFAULT_SETTINGS)
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
+
+  // Load persisted settings after mount (avoids SSR/hydration mismatch)
+  useEffect(() => {
+    setSettings(loadSettings())
+  }, [])
 
   const refreshDevices = useCallback(async () => {
     try {
@@ -101,6 +126,7 @@ export function useWebcam() {
   const updateSettings = useCallback(async (patch: Partial<StreamSettings>): Promise<MediaStream | null> => {
     const next = { ...settings, ...patch }
     setSettings(next)
+    saveSettings(next)
     if (isActive) return start(next)
     return null
   }, [settings, isActive, start])

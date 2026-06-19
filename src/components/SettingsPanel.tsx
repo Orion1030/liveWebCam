@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { X, RefreshCw, Copy, Zap, Settings, Link2, Check } from "lucide-react";
-import type { StreamSettings, Quality } from "@/hooks/useWebcam";
+import type { StreamSettings, Quality, VideoCodec } from "@/hooks/useWebcam";
 import type { TunnelState } from "@/lib/store";
 
 interface Props {
@@ -180,11 +180,11 @@ export default function SettingsPanel({
               active={settings.fps}
               onSelect={(v) => onSettingsChange({ fps: v as number })}
               values={[
+                { label: "5", value: 5 },
                 { label: "10", value: 10 },
                 { label: "15", value: 15 },
                 { label: "24", value: 24 },
                 { label: "30", value: 30 },
-                { label: "60", value: 60 },
               ]}
             />
           </section>
@@ -203,6 +203,38 @@ export default function SettingsPanel({
                 { label: "High", sub: "4 Mbps", value: "high" },
                 { label: "Medium", sub: "2 Mbps", value: "medium" },
                 { label: "Low", sub: "500 Kbps", value: "low" },
+              ]}
+            />
+          </section>
+
+          {/* Codec */}
+          <section>
+            <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+              Codec
+            </label>
+            <OptionRow
+              cols={2}
+              active={settings.codec}
+              onSelect={(v) => onSettingsChange({ codec: v as VideoCodec })}
+              values={[
+                { label: "VP8", sub: "Universal", value: "vp8" },
+                { label: "H.264", sub: "Hardware", value: "h264" },
+              ]}
+            />
+          </section>
+
+          {/* Frame mode */}
+          <section>
+            <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+              Frame Mode
+            </label>
+            <OptionRow
+              cols={2}
+              active={settings.keyframeOnly ? "full" : "delta"}
+              onSelect={(v) => onSettingsChange({ keyframeOnly: v === "full" })}
+              values={[
+                { label: "Delta", sub: "Efficient", value: "delta" },
+                { label: "Full", sub: "Resilient", value: "full" },
               ]}
             />
           </section>

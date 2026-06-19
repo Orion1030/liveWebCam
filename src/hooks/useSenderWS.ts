@@ -12,18 +12,31 @@ export type SenderWSStatus = 'idle' | 'live' | 'error'
 const MAGIC = new Uint8Array([0xC0, 0xFF, 0xEE, 0x01])
 const HEADER = 5 // 4 magic + 1 type
 
+// JSON cannot carry ArrayBuffers. H.264 decoderConfig.description contains
+// SPS/PPS AVCC extradata as an ArrayBuffer — encode it to base64 for transport.
+function serializeDecoderConfig(cfg: VideoDecoderConfig): Record<string, unknown> {
+  if (!cfg.description) return cfg as unknown as Record<string, unknown>
+  const view = ArrayBuffer.isView(cfg.description)
+    ? new Uint8Array(cfg.description.buffer, cfg.description.byteOffset, cfg.description.byteLength)
+    : new Uint8Array(cfg.description)
+  let bin = ''
+  view.forEach(b => (bin += String.fromCharCode(b)))
+  return { ...cfg, description: btoa(bin) }
+}
+
 function wsUrl(role: string) {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   return `${proto}://${location.host}/ws?role=${role}`
 }
 
 export function useSenderWS() {
-  const wsRef       = useRef<WebSocket | null>(null)
-  const encoderRef  = useRef<VideoEncoder | null>(null)
-  const readerRef   = useRef<ReadableStreamDefaultReader<VideoFrame> | null>(null)
-  const dimsRef     = useRef({ width: 1280, height: 720 })
-  const frameRef    = useRef(0)
-  const droppedRef  = useRef(false) // true when a frame was dropped → next encode must be keyframe
+  const wsRef          = useRef<WebSocket | null>(null)
+  const encoderRef     = useRef<VideoEncoder | null>(null)
+  const readerRef      = useRef<ReadableStreamDefaultReader<VideoFrame> | null>(null)
+  const dimsRef        = useRef({ width: 1280, height: 720 })
+  const frameRef       = useRef(0)
+  const droppedRef     = useRef(false) // true when a delta was dropped → next encode must be keyframe
+  const keyframeOnlyRef = useRef(false) // mirrors settings.keyframeOnly, readable inside the pump closure
   const [status, setStatus] = useState<SenderWSStatus>('idle')
 
   const stop = useCallback(() => {
@@ -70,7 +83,7 @@ export function useSenderWS() {
         // send later deltas that reference this unsent chunk, causing VP8 corruption.
         // All dropping is done in the pump (before encoding) so droppedRef is always set.
         if (meta?.decoderConfig) {
-          ws.send(JSON.stringify({ t: 'config', c: meta.decoderConfig, w: width, h: height }))
+          ws.send(JSON.stringify({ t: 'config', c: serializeDecoderConfig(meta.decoderConfig), w: width, h: height }))
         }
         const payload = new Uint8Array(HEADER + chunk.byteLength)
         payload.set(MAGIC, 0)
@@ -82,7 +95,7 @@ export function useSenderWS() {
     })
 
     encoder.configure({
-      codec: 'vp8',
+      codec: settings.codec === 'h264' ? 'avc1.42001f' : 'vp8',
       width,
       height,
       bitrate: QUALITY_BITRATES[settings.quality],
@@ -90,8 +103,9 @@ export function useSenderWS() {
       latencyMode: 'realtime',   // encode immediately, no look-ahead buffering
     })
 
-    encoderRef.current = encoder
-    frameRef.current   = 0
+    encoderRef.current    = encoder
+    frameRef.current      = 0
+    keyframeOnlyRef.current = settings.keyframeOnly
 
     // MediaStreamTrackProcessor gives us VideoFrame objects straight from the
     // camera with no timeslice delay — each frame is available as soon as the
@@ -112,24 +126,23 @@ export function useSenderWS() {
           // frames — we are faster than the encoder. Drop this frame rather than
           // letting frames stack up and grow latency. Keyframes are never dropped
           // so late-joining viewers can always start decoding.
+          const kfOnly = keyframeOnlyRef.current
           const scheduledKey = frameRef.current % (settings.fps * 2) === 0
-          const keyFrame = scheduledKey || droppedRef.current
+          const keyFrame = kfOnly || scheduledKey || droppedRef.current
 
           // Drop before encoding (not after) so we never send a delta that
-          // references a frame the viewer hasn't seen. Two conditions both drop:
-          //  1. encoder is backed up → encoding too slow for the frame rate
-          //  2. TCP send buffer is backed up → network too slow for the bitrate
-          // Keyframes are never dropped — they carry no reference and let the
-          // viewer resync after any gap.
+          // references a frame the viewer hasn't seen.
+          // In keyframe-only mode every frame is independent so any frame can be
+          // dropped on backpressure. In delta mode only deltas are dropped.
           const backpressure = encoder.encodeQueueSize > 0 || ws.bufferedAmount > 256 * 1024
-          if (!keyFrame && backpressure) {
-            console.warn(`[Sender] Dropped delta frame #${frameRef.current} — encodeQueue=${encoder.encodeQueueSize} buffered=${ws.bufferedAmount}`)
+          if (backpressure && (kfOnly || !keyFrame)) {
+            console.warn(`[Sender] Dropped ${kfOnly ? 'keyframe' : 'delta'} frame #${frameRef.current} — encodeQueue=${encoder.encodeQueueSize} buffered=${ws.bufferedAmount}`)
             frame.close()
             frameRef.current++
-            droppedRef.current = true
+            if (!kfOnly) droppedRef.current = true
             continue
           }
-          if (keyFrame) droppedRef.current = false
+          if (!kfOnly && keyFrame) droppedRef.current = false
 
           encoder.encode(frame, { keyFrame })
           frame.close()
@@ -147,8 +160,9 @@ export function useSenderWS() {
     const encoder = encoderRef.current
     if (!encoder) return
     const { width, height } = dimsRef.current
+    keyframeOnlyRef.current = settings.keyframeOnly
     encoder.configure({
-      codec: 'vp8',
+      codec: settings.codec === 'h264' ? 'avc1.42001f' : 'vp8',
       width,
       height,
       bitrate: QUALITY_BITRATES[settings.quality],

@@ -8,7 +8,6 @@ import {
   Minimize2,
   Wifi,
   WifiOff,
-  Loader2,
 } from "lucide-react";
 import { useViewerWS } from "@/hooks/useViewerWS";
 
@@ -46,7 +45,7 @@ export default function ViewerApp({ sessionId, sessionToken }: { sessionId: stri
     else document.exitFullscreen();
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     setAuthError("");
     const res = await fetch("/api/pin/verify", {
@@ -148,41 +147,22 @@ export default function ViewerApp({ sessionId, sessionToken }: { sessionId: stri
         aspect ratio — same visual behaviour as <video object-contain>.
       */}
       <div className="w-full h-full flex items-center justify-center">
-        <canvas ref={canvasRef} className="max-w-full max-h-full" />
+        <canvas ref={canvasRef} className="h-full w-auto" />
       </div>
-
-      {(status === "connecting" || status === "waiting") && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-          <Loader2 size={36} className="text-blue-400 animate-spin mb-3" />
-          <p className="text-zinc-400 text-sm">
-            {status === "waiting"
-              ? "Waiting for stream to start…"
-              : "Connecting…"}
-          </p>
-        </div>
-      )}
-
-      {status === "error" && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <WifiOff size={40} className="text-red-700 mb-3" />
-          <p className="text-zinc-500 text-sm">Connection failed</p>
-          <button
-            onClick={() => connect()}
-            className="mt-4 px-4 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm rounded-md transition-colors"
-          >
-            Reconnect
-          </button>
-        </div>
-      )}
 
       <div
         className={`absolute top-4 right-4 transition-opacity duration-300 ${showControls ? "opacity-100" : "opacity-0"}`}
       >
         <div className="flex items-center gap-1">
-          {status === "playing" && (
+          {status === "playing" ? (
             <span className="flex items-center gap-1.5 text-[11px] text-green-400 bg-black/50 px-2 py-1 rounded-md mr-2">
               <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
               LIVE
+            </span>
+          ) : (
+            <span className="flex items-center gap-1.5 text-[11px] text-red-400 bg-black/50 px-2 py-1 rounded-md mr-2">
+              <span className="w-1.5 h-1.5 bg-red-400 rounded-full animate-pulse" />
+              Connecting...
             </span>
           )}
           <button
