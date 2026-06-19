@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { useViewerWS } from "@/hooks/useViewerWS";
 
-export default function ViewerApp({ sessionId }: { sessionId: string }) {
+export default function ViewerApp({ sessionId, sessionToken }: { sessionId: string; sessionToken: string }) {
   const [pin, setPin] = useState("");
   const [showPin, setShowPin] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -52,7 +52,7 @@ export default function ViewerApp({ sessionId }: { sessionId: string }) {
     const res = await fetch("/api/pin/verify", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pin, sessionId }),
+      body: JSON.stringify({ pin, sessionId, sessionToken }),
     });
     const { valid } = await res.json();
     if (valid) {
@@ -65,7 +65,7 @@ export default function ViewerApp({ sessionId }: { sessionId: string }) {
 
   if (!isAuthenticated) {
     // Guard: session ID must be in the URL — direct visits to /view won't work
-    if (!sessionId) {
+    if (!sessionId || !sessionToken) {
       return (
         <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
           <div className="text-center">

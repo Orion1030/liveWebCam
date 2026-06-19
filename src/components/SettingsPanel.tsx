@@ -13,6 +13,7 @@ interface Props {
   devices: MediaDeviceInfo[];
   pin: string;
   sessionId: string;
+  sessionToken: string;
   pinFixed?: boolean;
   onRegeneratePin: () => void;
   tunnel: TunnelState;
@@ -72,6 +73,7 @@ export default function SettingsPanel({
   devices,
   pin,
   sessionId,
+  sessionToken,
   pinFixed = false,
   onRegeneratePin,
   tunnel,
@@ -80,15 +82,13 @@ export default function SettingsPanel({
 }: Props) {
   const [linkCopied, setLinkCopied] = useState(false);
 
-  const tunnelActive = tunnel.status === "running" && !!tunnel.url;
-
   const copySessionLink = () => {
-    copy(`${window.location.origin}/view?s=${sessionId}`);
+    copy(`${window.location.origin}/view?s=${sessionId}&t=${sessionToken}`);
     setLinkCopied(true);
     setTimeout(() => setLinkCopied(false), 2000);
   };
   const copyTunnelSessionLink = () => {
-    copy(`${tunnel.url}/view?s=${sessionId}`);
+    copy(`${tunnel.url}/view?s=${sessionId}&t=${sessionToken}`);
     setLinkCopied(true);
     setTimeout(() => setLinkCopied(false), 2000);
   };

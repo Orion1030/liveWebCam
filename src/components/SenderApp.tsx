@@ -29,12 +29,14 @@ function isJwtExpired(token: string): boolean {
 interface Props {
   initialPin: string;
   initialSessionId: string;
+  initialSessionToken: string;
   pinFixed?: boolean;
 }
 
 export default function SenderApp({
   initialPin,
   initialSessionId,
+  initialSessionToken,
   pinFixed = false,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -66,6 +68,7 @@ export default function SenderApp({
   const [isLive, setIsLive] = useState(false);
   const [pin, setPin] = useState(initialPin);
   const [sessionId, setSessionId] = useState(initialSessionId);
+  const [sessionToken, setSessionToken] = useState(initialSessionToken);
   const [copied, setCopied] = useState(false);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -163,16 +166,17 @@ export default function SenderApp({
       headers: { Authorization: `Bearer ${token}` },
     });
     if (res.ok) {
-      const { pin: newPin, sessionId: newSessionId } = await res.json();
+      const { pin: newPin, sessionId: newSessionId, sessionToken: newToken } = await res.json();
       setPin(newPin);
       setSessionId(newSessionId);
+      setSessionToken(newToken);
     }
   };
 
   const copyTunnelLink = () => {
     if (!tunnel.url) return;
     navigator.clipboard
-      .writeText(`${tunnel.url}/view?s=${sessionId}`)
+      .writeText(`${tunnel.url}/view?s=${sessionId}&t=${sessionToken}`)
       .catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -309,6 +313,7 @@ export default function SenderApp({
         devices={devices}
         pin={pin}
         sessionId={sessionId}
+        sessionToken={sessionToken}
         pinFixed={pinFixed}
         onRegeneratePin={handleRegeneratePin}
         tunnel={tunnel}
