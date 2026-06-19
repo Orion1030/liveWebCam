@@ -1,24 +1,27 @@
-'use client'
+"use client";
 
-import { X, RefreshCw, Copy, Zap, Settings } from 'lucide-react'
-import type { StreamSettings, Quality } from '@/hooks/useWebcam'
-import type { TunnelState } from '@/lib/store'
+import { useState } from "react";
+import { X, RefreshCw, Copy, Zap, Settings, Link2, Check } from "lucide-react";
+import type { StreamSettings, Quality } from "@/hooks/useWebcam";
+import type { TunnelState } from "@/lib/store";
 
 interface Props {
-  isOpen: boolean
-  onClose: () => void
-  settings: StreamSettings
-  onSettingsChange: (patch: Partial<StreamSettings>) => void
-  devices: MediaDeviceInfo[]
-  pin: string
-  onRegeneratePin: () => void
-  tunnel: TunnelState
-  onStartTunnel: () => void
-  onStopTunnel: () => void
+  isOpen: boolean;
+  onClose: () => void;
+  settings: StreamSettings;
+  onSettingsChange: (patch: Partial<StreamSettings>) => void;
+  devices: MediaDeviceInfo[];
+  pin: string;
+  sessionId: string;
+  pinFixed?: boolean;
+  onRegeneratePin: () => void;
+  tunnel: TunnelState;
+  onStartTunnel: () => void;
+  onStopTunnel: () => void;
 }
 
 function copy(text: string) {
-  navigator.clipboard.writeText(text).catch(() => {})
+  navigator.clipboard.writeText(text).catch(() => {});
 }
 
 function OptionRow({
@@ -27,51 +30,82 @@ function OptionRow({
   onSelect,
   cols = 3,
 }: {
-  values: { label: string; sub?: string; value: string | number }[]
-  active: string | number
-  onSelect: (v: string | number) => void
-  cols?: number
+  values: { label: string; sub?: string; value: string | number }[];
+  active: string | number;
+  onSelect: (v: string | number) => void;
+  cols?: number;
 }) {
   return (
-    <div className={`grid gap-1.5`} style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
-      {values.map(v => (
+    <div
+      className={`grid gap-1.5`}
+      style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}
+    >
+      {values.map((v) => (
         <button
           key={v.value}
           onClick={() => onSelect(v.value)}
           className={`py-2 px-1 rounded-md text-xs font-medium transition-colors text-center ${
             active === v.value
-              ? 'bg-blue-600 text-white'
-              : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
+              ? "bg-blue-600 text-white"
+              : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
           }`}
         >
           {v.label}
           {v.sub && (
-            <span className={`block text-[10px] mt-0.5 ${active === v.value ? 'text-blue-200' : 'text-zinc-600'}`}>
+            <span
+              className={`block text-[10px] mt-0.5 ${active === v.value ? "text-blue-200" : "text-zinc-600"}`}
+            >
               {v.sub}
             </span>
           )}
         </button>
       ))}
     </div>
-  )
+  );
 }
 
 export default function SettingsPanel({
-  isOpen, onClose, settings, onSettingsChange, devices,
-  pin, onRegeneratePin,
-  tunnel, onStartTunnel, onStopTunnel,
+  isOpen,
+  onClose,
+  settings,
+  onSettingsChange,
+  devices,
+  pin,
+  sessionId,
+  pinFixed = false,
+  onRegeneratePin,
+  tunnel,
+  onStartTunnel,
+  onStopTunnel,
 }: Props) {
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  const tunnelActive = tunnel.status === "running" && !!tunnel.url;
+
+  const copySessionLink = () => {
+    copy(`${window.location.origin}/view?s=${sessionId}`);
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2000);
+  };
+  const copyTunnelSessionLink = () => {
+    copy(`${tunnel.url}/view?s=${sessionId}`);
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2000);
+  };
+
   return (
-    <div className={`fixed inset-0 z-50 ${isOpen ? 'pointer-events-auto' : 'pointer-events-none'}`}>
+    <div
+      className={`fixed inset-0 z-50 ${isOpen ? "pointer-events-auto" : "pointer-events-none"}`}
+    >
       {/* Backdrop */}
       <div
-        className={`absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-200 ${isOpen ? 'opacity-100' : 'opacity-0'}`}
+        className={`absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-200 ${isOpen ? "opacity-100" : "opacity-0"}`}
         onClick={onClose}
       />
 
       {/* Panel */}
       <div
-        className={`absolute right-0 top-0 h-full w-72 bg-zinc-950 border-l border-zinc-800 flex flex-col transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}
+        className={`absolute right-0 top-0 h-full w-72 bg-zinc-950 border-l border-zinc-800 flex flex-col transform transition-transform duration-300 ease-in-out ${isOpen ? "translate-x-0" : "translate-x-full"}`}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 shrink-0">
@@ -79,25 +113,31 @@ export default function SettingsPanel({
             <Settings size={14} />
             <span className="text-sm font-semibold">Stream Settings</span>
           </div>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200 transition-colors p-1">
+          <button
+            onClick={onClose}
+            className="text-zinc-500 hover:text-zinc-200 transition-colors p-1"
+          >
             <X size={16} />
           </button>
         </div>
 
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto p-4 space-y-5">
-
           {/* Video Source */}
           <section>
             <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
               Video Source
             </label>
             {devices.length === 0 ? (
-              <p className="text-[11px] text-zinc-600">No cameras detected — grant permission first</p>
+              <p className="text-[11px] text-zinc-600">
+                No cameras detected — grant permission first
+              </p>
             ) : (
               <select
-                value={settings.deviceId ?? ''}
-                onChange={e => onSettingsChange({ deviceId: e.target.value || undefined })}
+                value={settings.deviceId ?? ""}
+                onChange={(e) =>
+                  onSettingsChange({ deviceId: e.target.value || undefined })
+                }
                 className="w-full bg-zinc-800 border border-zinc-700 text-zinc-200 text-xs rounded-md px-3 py-2 focus:outline-none focus:border-blue-500 cursor-pointer"
               >
                 {devices.map((d, i) => (
@@ -119,13 +159,13 @@ export default function SettingsPanel({
             <OptionRow
               cols={3}
               active={settings.resolution}
-              onSelect={v => onSettingsChange({ resolution: v as string })}
+              onSelect={(v) => onSettingsChange({ resolution: v as string })}
               values={[
-                { label: '360p', value: '360p' },
-                { label: '480p', value: '480p' },
-                { label: '720p', value: '720p' },
-                { label: '1080p', value: '1080p' },
-                { label: '4K', value: '4K' },
+                { label: "360p", value: "360p" },
+                { label: "480p", value: "480p" },
+                { label: "720p", value: "720p" },
+                { label: "1080p", value: "1080p" },
+                { label: "4K", value: "4K" },
               ]}
             />
           </section>
@@ -138,13 +178,13 @@ export default function SettingsPanel({
             <OptionRow
               cols={5}
               active={settings.fps}
-              onSelect={v => onSettingsChange({ fps: v as number })}
+              onSelect={(v) => onSettingsChange({ fps: v as number })}
               values={[
-                { label: '10', value: 10 },
-                { label: '15', value: 15 },
-                { label: '24', value: 24 },
-                { label: '30', value: 30 },
-                { label: '60', value: 60 },
+                { label: "10", value: 10 },
+                { label: "15", value: 15 },
+                { label: "24", value: 24 },
+                { label: "30", value: 30 },
+                { label: "60", value: 60 },
               ]}
             />
           </section>
@@ -157,43 +197,74 @@ export default function SettingsPanel({
             <OptionRow
               cols={2}
               active={settings.quality}
-              onSelect={v => onSettingsChange({ quality: v as Quality })}
+              onSelect={(v) => onSettingsChange({ quality: v as Quality })}
               values={[
-                { label: 'Ultra', sub: '8 Mbps', value: 'ultra' },
-                { label: 'High', sub: '4 Mbps', value: 'high' },
-                { label: 'Medium', sub: '2 Mbps', value: 'medium' },
-                { label: 'Low', sub: '500 Kbps', value: 'low' },
+                { label: "Ultra", sub: "8 Mbps", value: "ultra" },
+                { label: "High", sub: "4 Mbps", value: "high" },
+                { label: "Medium", sub: "2 Mbps", value: "medium" },
+                { label: "Low", sub: "500 Kbps", value: "low" },
               ]}
             />
           </section>
 
           <div className="border-t border-zinc-800" />
 
-          {/* PIN */}
-          <section>
-            <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
-              Viewer PIN
-            </label>
-            <div className="flex items-center gap-2 mb-1.5">
-              <div className="flex-1 bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 font-mono text-xl tracking-[0.4em] text-zinc-100 text-center select-all">
-                {pin}
+          {/* Session ID + Passcode */}
+          <section className="space-y-3">
+            <div>
+              <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+                Session ID
+              </label>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 font-mono text-sm text-zinc-300 text-center select-all tracking-widest">
+                  {sessionId}
+                </div>
+                <button
+                  onClick={copySessionLink}
+                  title="Copy session link"
+                  className="p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 rounded-md transition-colors"
+                >
+                  {linkCopied ? (
+                    <Check size={14} className="text-green-400" />
+                  ) : (
+                    <Link2 size={14} />
+                  )}
+                </button>
               </div>
-              <button
-                onClick={onRegeneratePin}
-                title="Generate new PIN"
-                className="p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 rounded-md transition-colors"
-              >
-                <RefreshCw size={14} />
-              </button>
-              <button
-                onClick={() => copy(pin)}
-                title="Copy PIN"
-                className="p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 rounded-md transition-colors"
-              >
-                <Copy size={14} />
-              </button>
             </div>
-            <p className="text-[11px] text-zinc-600">Share this PIN with your viewer</p>
+
+            <div>
+              <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+                Passcode
+              </label>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 font-mono text-xl tracking-[0.4em] text-zinc-100 text-center select-all">
+                  {pin}
+                </div>
+                <button
+                  onClick={onRegeneratePin}
+                  disabled={pinFixed}
+                  title={
+                    pinFixed
+                      ? "Passcode is fixed via STREAM_PIN env var"
+                      : "Generate new passcode + session ID"
+                  }
+                  className="p-2 bg-zinc-800 rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed hover:enabled:bg-zinc-700 text-zinc-400 hover:enabled:text-zinc-200"
+                >
+                  <RefreshCw size={14} />
+                </button>
+                <button
+                  onClick={() => copy(pin)}
+                  title="Copy passcode"
+                  className="p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 rounded-md transition-colors"
+                >
+                  <Copy size={14} />
+                </button>
+              </div>
+              <p className="text-[11px] text-zinc-600 mt-1">
+                Share this passcode separately with your viewer
+              </p>
+            </div>
           </section>
 
           <div className="border-t border-zinc-800" />
@@ -204,7 +275,7 @@ export default function SettingsPanel({
               Cloudflare Tunnel
             </label>
 
-            {tunnel.status === 'idle' && (
+            {tunnel.status === "idle" && (
               <div>
                 <button
                   onClick={onStartTunnel}
@@ -214,20 +285,21 @@ export default function SettingsPanel({
                   Start Tunnel
                 </button>
                 <p className="text-[11px] text-zinc-600 mt-1.5">
-                  Requires{' '}
-                  <span className="font-mono text-zinc-500">cloudflared</span> in PATH
+                  Requires{" "}
+                  <span className="font-mono text-zinc-500">cloudflared</span>{" "}
+                  in PATH
                 </p>
               </div>
             )}
 
-            {tunnel.status === 'starting' && (
+            {tunnel.status === "starting" && (
               <div className="flex items-center gap-2 text-zinc-400 text-sm py-1">
                 <div className="w-3.5 h-3.5 border-2 border-zinc-600 border-t-orange-400 rounded-full animate-spin" />
                 Starting tunnel…
               </div>
             )}
 
-            {tunnel.status === 'running' && tunnel.url && (
+            {tunnel.status === "running" && tunnel.url && (
               <div className="space-y-2">
                 <div className="bg-zinc-900 border border-zinc-800 rounded-md p-3">
                   <div className="flex items-center justify-between mb-2">
@@ -242,11 +314,15 @@ export default function SettingsPanel({
                       Stop
                     </button>
                   </div>
-                  <p className="font-mono text-[11px] text-zinc-300 break-all">{tunnel.url}</p>
-                  <p className="text-[11px] text-zinc-600 mt-1">Viewer URL: {tunnel.url}/view</p>
+                  <p className="font-mono text-[11px] text-zinc-300 break-all">
+                    {tunnel.url}
+                  </p>
+                  <p className="text-[11px] text-zinc-600 mt-1 break-all">
+                    {tunnel.url}/view?s={sessionId}
+                  </p>
                 </div>
                 <button
-                  onClick={() => copy(`${tunnel.url}/view`)}
+                  onClick={copyTunnelSessionLink}
                   className="w-full flex items-center justify-center gap-2 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-md text-xs transition-colors"
                 >
                   <Copy size={12} />
@@ -255,15 +331,19 @@ export default function SettingsPanel({
               </div>
             )}
 
-            {tunnel.status === 'error' && (
+            {tunnel.status === "error" && (
               <div>
                 <p className="text-sm text-red-400 mb-2">
-                  {tunnel.error ?? 'Failed to start tunnel'}
+                  {tunnel.error ?? "Failed to start tunnel"}
                 </p>
                 <p className="text-[11px] text-zinc-600 mb-2">
-                  Make sure <span className="font-mono">cloudflared</span> is installed and in your PATH.
+                  Make sure <span className="font-mono">cloudflared</span> is
+                  installed and in your PATH.
                 </p>
-                <button onClick={onStartTunnel} className="text-xs text-zinc-400 hover:text-zinc-200 underline">
+                <button
+                  onClick={onStartTunnel}
+                  className="text-xs text-zinc-400 hover:text-zinc-200 underline"
+                >
                   Retry
                 </button>
               </div>
@@ -272,5 +352,5 @@ export default function SettingsPanel({
         </div>
       </div>
     </div>
-  )
+  );
 }

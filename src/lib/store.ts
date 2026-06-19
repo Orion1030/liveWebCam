@@ -18,8 +18,14 @@ export interface TunnelState {
 
 type Listener = (event: string, data: unknown) => void
 
+export function generateSessionId(): string {
+  const hex = () => Math.floor(Math.random() * 0x10000).toString(16).padStart(4, '0')
+  return `${hex()}-${hex()}`
+}
+
 interface AppStore {
   pin: string
+  sessionId: string
   offer: SessionDesc | null
   answer: SessionDesc | null
   senderCandidates: IceCandidateData[]
@@ -43,6 +49,7 @@ if (!global.__appStore) {
     // not shared between invocations), use it. Otherwise generate a random PIN
     // for the local custom-server mode.
     pin: process.env.STREAM_PIN ?? Math.floor(100000 + Math.random() * 900000).toString(),
+    sessionId: process.env.STREAM_SESSION_ID ?? generateSessionId(),
     offer: null,
     answer: null,
     senderCandidates: [],

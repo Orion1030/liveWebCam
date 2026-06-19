@@ -1,61 +1,86 @@
-'use client'
+"use client";
 
-import { useState, useEffect, useRef } from 'react'
-import { Eye, EyeOff, Maximize2, Minimize2, Wifi, WifiOff, Loader2 } from 'lucide-react'
-import { useViewerWS } from '@/hooks/useViewerWS'
+import { useState, useEffect, useRef } from "react";
+import {
+  Eye,
+  EyeOff,
+  Maximize2,
+  Minimize2,
+  Wifi,
+  WifiOff,
+  Loader2,
+} from "lucide-react";
+import { useViewerWS } from "@/hooks/useViewerWS";
 
-export default function ViewerApp() {
-  const [pin, setPin] = useState('')
-  const [showPin, setShowPin] = useState(false)
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [authError, setAuthError] = useState('')
-  const [isFullscreen, setIsFullscreen] = useState(false)
-  const [showControls, setShowControls] = useState(true)
-  const containerRef = useRef<HTMLDivElement>(null)
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+export default function ViewerApp({ sessionId }: { sessionId: string }) {
+  const [pin, setPin] = useState("");
+  const [showPin, setShowPin] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showControls, setShowControls] = useState(true);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { canvasRef, status, connect } = useViewerWS()
+  const { canvasRef, status, connect } = useViewerWS();
 
   useEffect(() => {
-    if (isAuthenticated) connect()
-  }, [isAuthenticated]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (isAuthenticated) connect();
+  }, [isAuthenticated]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    const handler = () => setIsFullscreen(!!document.fullscreenElement)
-    document.addEventListener('fullscreenchange', handler)
-    return () => document.removeEventListener('fullscreenchange', handler)
-  }, [])
+    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", handler);
+    return () => document.removeEventListener("fullscreenchange", handler);
+  }, []);
 
   const revealControls = () => {
-    setShowControls(true)
-    if (!isFullscreen) return
-    if (hideTimer.current) clearTimeout(hideTimer.current)
-    hideTimer.current = setTimeout(() => setShowControls(false), 3000)
-  }
+    setShowControls(true);
+    if (!isFullscreen) return;
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    hideTimer.current = setTimeout(() => setShowControls(false), 3000);
+  };
 
   const toggleFullscreen = () => {
-    if (!document.fullscreenElement) containerRef.current?.requestFullscreen()
-    else document.exitFullscreen()
-  }
+    if (!document.fullscreenElement) containerRef.current?.requestFullscreen();
+    else document.exitFullscreen();
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setAuthError('')
-    const res = await fetch('/api/pin/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin }),
-    })
-    const { valid } = await res.json()
+    e.preventDefault();
+    setAuthError("");
+    const res = await fetch("/api/pin/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin, sessionId }),
+    });
+    const { valid } = await res.json();
     if (valid) {
-      setIsAuthenticated(true)
+      setIsAuthenticated(true);
     } else {
-      setAuthError('Incorrect PIN. Please try again.')
-      setPin('')
+      setAuthError("Incorrect passcode. Please try again.");
+      setPin("");
     }
-  }
+  };
 
   if (!isAuthenticated) {
+    // Guard: session ID must be in the URL — direct visits to /view won't work
+    if (!sessionId) {
+      return (
+        <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
+          <div className="text-center">
+            <WifiOff size={40} className="text-red-700 mx-auto mb-4" />
+            <h1 className="text-xl font-semibold text-zinc-100 mb-2">
+              Invalid session link
+            </h1>
+            <p className="text-sm text-zinc-500">
+              Ask the streamer to share the viewer link again.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
         <div className="w-full max-w-sm">
@@ -64,25 +89,30 @@ export default function ViewerApp() {
               <Wifi size={22} className="text-blue-400" />
             </div>
             <h1 className="text-xl font-semibold text-zinc-100">Join Stream</h1>
-            <p className="text-sm text-zinc-500 mt-1">Enter the PIN provided by the streamer</p>
+            <p className="text-sm text-zinc-500 mt-1">
+              Enter the passcode provided by the streamer
+            </p>
+            <p className="text-xs text-zinc-700 mt-1 font-mono">
+              Session ID: {sessionId}
+            </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="relative">
               <input
-                type={showPin ? 'text' : 'password'}
+                type={showPin ? "text" : "password"}
                 inputMode="numeric"
                 pattern="[0-9]{6}"
                 maxLength={6}
                 value={pin}
-                onChange={e => setPin(e.target.value.replace(/\D/g, ''))}
+                onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
                 placeholder="000000"
                 autoFocus
                 className="w-full bg-zinc-900 border border-zinc-700 focus:border-blue-500 focus:outline-none rounded-lg px-4 py-3 text-zinc-100 font-mono text-2xl tracking-[0.5em] text-center placeholder:text-zinc-700 placeholder:tracking-[0.3em] transition-colors"
               />
               <button
                 type="button"
-                onClick={() => setShowPin(v => !v)}
+                onClick={() => setShowPin((v) => !v)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors"
               >
                 {showPin ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -103,7 +133,7 @@ export default function ViewerApp() {
           </form>
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -118,22 +148,21 @@ export default function ViewerApp() {
         aspect ratio — same visual behaviour as <video object-contain>.
       */}
       <div className="w-full h-full flex items-center justify-center">
-        <canvas
-          ref={canvasRef}
-          className="max-w-full max-h-full"
-        />
+        <canvas ref={canvasRef} className="max-w-full max-h-full" />
       </div>
 
-      {(status === 'connecting' || status === 'waiting') && (
+      {(status === "connecting" || status === "waiting") && (
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
           <Loader2 size={36} className="text-blue-400 animate-spin mb-3" />
           <p className="text-zinc-400 text-sm">
-            {status === 'waiting' ? 'Waiting for stream to start…' : 'Connecting…'}
+            {status === "waiting"
+              ? "Waiting for stream to start…"
+              : "Connecting…"}
           </p>
         </div>
       )}
 
-      {status === 'error' && (
+      {status === "error" && (
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <WifiOff size={40} className="text-red-700 mb-3" />
           <p className="text-zinc-500 text-sm">Connection failed</p>
@@ -146,9 +175,11 @@ export default function ViewerApp() {
         </div>
       )}
 
-      <div className={`absolute top-4 right-4 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0'}`}>
+      <div
+        className={`absolute top-4 right-4 transition-opacity duration-300 ${showControls ? "opacity-100" : "opacity-0"}`}
+      >
         <div className="flex items-center gap-1">
-          {status === 'playing' && (
+          {status === "playing" && (
             <span className="flex items-center gap-1.5 text-[11px] text-green-400 bg-black/50 px-2 py-1 rounded-md mr-2">
               <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
               LIVE
@@ -163,5 +194,5 @@ export default function ViewerApp() {
         </div>
       </div>
     </div>
-  )
+  );
 }
