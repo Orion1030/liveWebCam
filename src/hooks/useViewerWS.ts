@@ -9,13 +9,19 @@ function wsUrl(role: string) {
   return `${proto}://${location.host}/ws?role=${role}`
 }
 
+// Must match MAGIC in useSenderWS.ts
+const MAGIC = new Uint8Array([0xC0, 0xFF, 0xEE, 0x01])
+const HEADER = 5 // 4 magic + 1 type byte
+
 export function useViewerWS() {
-  const canvasRef   = useRef<HTMLCanvasElement>(null)
-  const wsRef       = useRef<WebSocket | null>(null)
-  const decoderRef  = useRef<VideoDecoder | null>(null)
+  const canvasRef      = useRef<HTMLCanvasElement>(null)
+  const wsRef          = useRef<WebSocket | null>(null)
+  const decoderRef     = useRef<VideoDecoder | null>(null)
+  const lastConfigRef  = useRef<{ c: VideoDecoderConfig; w: number; h: number } | null>(null)
+  const needsResyncRef = useRef(false) // true after a decoder error — wait for next keyframe
   const [status, setStatus] = useState<ViewerWSStatus>('idle')
-  const activeRef   = useRef(false)
-  const retryRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const activeRef      = useRef(false)
+  const retryRef       = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const cleanup = useCallback(() => {
     activeRef.current = false
@@ -36,7 +42,7 @@ export function useViewerWS() {
     ws.binaryType = 'arraybuffer'
 
     ws.onopen  = () => { if (activeRef.current) setStatus('waiting') }
-    ws.onerror = () => { if (activeRef.current) setStatus('error') }
+    ws.onerror = (e) => { console.error('[Viewer] WebSocket error', e); if (activeRef.current) setStatus('error') }
 
     ws.onclose = () => {
       if (!activeRef.current) return
@@ -52,24 +58,32 @@ export function useViewerWS() {
         const msg = JSON.parse(event.data as string) as { t: string; c?: VideoDecoderConfig; w?: number; h?: number }
 
         if (msg.t === 'config' && msg.c) {
-          // Sender started — initialise decoder with the exact codec the sender used
           try { decoderRef.current?.close() } catch {}
+          needsResyncRef.current = false
 
           const canvas = canvasRef.current
           if (!canvas) return
 
-          canvas.width  = msg.w ?? 1280
-          canvas.height = msg.h ?? 720
+          const w = msg.w ?? 1280
+          const h = msg.h ?? 720
+          canvas.width  = w
+          canvas.height = h
+          lastConfigRef.current = { c: msg.c, w, h }
 
           const decoder = new VideoDecoder({
             output: (frame) => {
-              // Draw directly to canvas — zero buffering, frame is displayed
-              // the moment it is decoded, which is the moment it arrived.
               const ctx = canvasRef.current?.getContext('2d')
               if (ctx) ctx.drawImage(frame, 0, 0)
               frame.close()
             },
-            error: () => { if (activeRef.current) setStatus('error') },
+            // On decoder error: don't crash the status — hold the last canvas frame
+            // and wait for the next keyframe to rebuild decoder state cleanly.
+            error: (e) => {
+              console.warn('[Viewer] VideoDecoder error, waiting for keyframe resync', e)
+              needsResyncRef.current = true
+              try { decoderRef.current?.close() } catch {}
+              decoderRef.current = null
+            },
           })
           decoder.configure(msg.c)
           decoderRef.current = decoder
@@ -80,20 +94,67 @@ export function useViewerWS() {
         }
 
       } else {
-        // Binary frame: [1 byte: isKeyFrame][...VP8 data]
+        // Binary frame: [4 magic bytes][1 byte: isKeyFrame][...VP8 data]
+        const bytes = new Uint8Array(event.data as ArrayBuffer)
+
+        // Validate magic header — silently drop anything that doesn't match.
+        // Catches misaligned WebSocket frames, partial sends, or stray data.
+        if (
+          bytes.length < HEADER ||
+          bytes[0] !== MAGIC[0] || bytes[1] !== MAGIC[1] ||
+          bytes[2] !== MAGIC[2] || bytes[3] !== MAGIC[3]
+        ) {
+          console.warn('[Viewer] Dropped frame: invalid magic header', bytes.slice(0, 5))
+          return
+        }
+
+        const isKey = bytes[4] === 1
+
+        // After a decoder error, hold the last good canvas frame and wait for
+        // the next keyframe to rebuild decoder state from a clean reference.
+        if (needsResyncRef.current) {
+          if (!isKey) return
+          const cfg = lastConfigRef.current
+          if (!cfg) return
+          const canvas = canvasRef.current
+          if (!canvas) return
+          canvas.width  = cfg.w
+          canvas.height = cfg.h
+          const fresh = new VideoDecoder({
+            output: (frame) => {
+              const ctx = canvasRef.current?.getContext('2d')
+              if (ctx) ctx.drawImage(frame, 0, 0)
+              frame.close()
+            },
+            error: (e) => {
+              console.warn('[Viewer] VideoDecoder error during resync, retrying', e)
+              needsResyncRef.current = true
+              try { decoderRef.current?.close() } catch {}
+              decoderRef.current = null
+            },
+          })
+          fresh.configure(cfg.c)
+          decoderRef.current = fresh
+          needsResyncRef.current = false
+        }
+
         const decoder = decoderRef.current
         if (!decoder || decoder.state !== 'configured') return
 
-        const bytes = new Uint8Array(event.data as ArrayBuffer)
+        if (!isKey && decoder.decodeQueueSize > 2) return
+
         try {
           decoder.decode(new EncodedVideoChunk({
-            type: bytes[0] === 1 ? 'key' : 'delta',
-            // Monotonically increasing timestamp required by WebCodecs.
-            // performance.now() in microseconds is safe here.
+            type: isKey ? 'key' : 'delta',
             timestamp: performance.now() * 1000,
-            data: bytes.subarray(1),
+            data: bytes.subarray(HEADER),
           }))
-        } catch {}
+        } catch (e) {
+          console.warn('[Viewer] decoder.decode() threw, triggering resync', e)
+          needsResyncRef.current = true
+          try { decoderRef.current?.close() } catch {}
+          decoderRef.current = null
+        }
       }
     }
   }, [cleanup])

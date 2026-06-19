@@ -5,6 +5,13 @@ import { type StreamSettings, QUALITY_BITRATES } from './useWebcam'
 
 export type SenderWSStatus = 'idle' | 'live' | 'error'
 
+// Frame header: 4 magic bytes + 1 type byte.
+// Viewer validates the magic before touching the payload — any noise or partial
+// frame gets silently dropped before it can confuse the decoder.
+// Layout: [0xC0, 0xFF, 0xEE, 0x01, isKey, ...VP8 bytes]
+const MAGIC = new Uint8Array([0xC0, 0xFF, 0xEE, 0x01])
+const HEADER = 5 // 4 magic + 1 type
+
 function wsUrl(role: string) {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   return `${proto}://${location.host}/ws?role=${role}`
@@ -16,6 +23,7 @@ export function useSenderWS() {
   const readerRef   = useRef<ReadableStreamDefaultReader<VideoFrame> | null>(null)
   const dimsRef     = useRef({ width: 1280, height: 720 })
   const frameRef    = useRef(0)
+  const droppedRef  = useRef(false) // true when a frame was dropped → next encode must be keyframe
   const [status, setStatus] = useState<SenderWSStatus>('idle')
 
   const stop = useCallback(() => {
@@ -40,10 +48,11 @@ export function useSenderWS() {
     try {
       await new Promise<void>((resolve, reject) => {
         ws.onopen  = () => resolve()
-        ws.onerror = () => reject(new Error('ws-connect-failed'))
+        ws.onerror = (e) => { console.error('[Sender] WebSocket connection error', e); reject(new Error('ws-connect-failed')) }
         setTimeout(()  => reject(new Error('ws-timeout')), 5000)
       })
-    } catch {
+    } catch (e) {
+      console.error('[Sender] Failed to connect WebSocket', e)
       setStatus('error')
       return
     }
@@ -57,20 +66,19 @@ export function useSenderWS() {
     const encoder = new VideoEncoder({
       output: (chunk, meta) => {
         if (ws.readyState !== WebSocket.OPEN) return
-
-        // First keyframe carries the decoder config — send it as JSON so the
-        // viewer can initialise VideoDecoder with the exact codec parameters.
+        // Never drop here — dropping in the output callback after encoding would
+        // send later deltas that reference this unsent chunk, causing VP8 corruption.
+        // All dropping is done in the pump (before encoding) so droppedRef is always set.
         if (meta?.decoderConfig) {
           ws.send(JSON.stringify({ t: 'config', c: meta.decoderConfig, w: width, h: height }))
         }
-
-        // Binary frame layout: [1 byte: 1=keyframe / 0=delta][...VP8 bytes]
-        const payload = new Uint8Array(1 + chunk.byteLength)
-        payload[0] = chunk.type === 'key' ? 1 : 0
-        chunk.copyTo(payload.subarray(1))
+        const payload = new Uint8Array(HEADER + chunk.byteLength)
+        payload.set(MAGIC, 0)
+        payload[4] = chunk.type === 'key' ? 1 : 0
+        chunk.copyTo(payload.subarray(HEADER))
         ws.send(payload)
       },
-      error: () => setStatus('error'),
+      error: (e) => { console.error('[Sender] VideoEncoder error', e); setStatus('error') },
     })
 
     encoder.configure({
@@ -99,13 +107,37 @@ export function useSenderWS() {
         while (true) {
           const { done, value: frame } = await reader.read()
           if (done) break
-          // Force a keyframe every 2 s so late-joining viewers can start quickly
-          const keyFrame = frameRef.current % (settings.fps * 2) === 0
+
+          // encodeQueueSize > 0 means the encoder is still processing previous
+          // frames — we are faster than the encoder. Drop this frame rather than
+          // letting frames stack up and grow latency. Keyframes are never dropped
+          // so late-joining viewers can always start decoding.
+          const scheduledKey = frameRef.current % (settings.fps * 2) === 0
+          const keyFrame = scheduledKey || droppedRef.current
+
+          // Drop before encoding (not after) so we never send a delta that
+          // references a frame the viewer hasn't seen. Two conditions both drop:
+          //  1. encoder is backed up → encoding too slow for the frame rate
+          //  2. TCP send buffer is backed up → network too slow for the bitrate
+          // Keyframes are never dropped — they carry no reference and let the
+          // viewer resync after any gap.
+          const backpressure = encoder.encodeQueueSize > 0 || ws.bufferedAmount > 256 * 1024
+          if (!keyFrame && backpressure) {
+            console.warn(`[Sender] Dropped delta frame #${frameRef.current} — encodeQueue=${encoder.encodeQueueSize} buffered=${ws.bufferedAmount}`)
+            frame.close()
+            frameRef.current++
+            droppedRef.current = true
+            continue
+          }
+          if (keyFrame) droppedRef.current = false
+
           encoder.encode(frame, { keyFrame })
           frame.close()
           frameRef.current++
         }
-      } catch {}
+      } catch (e) {
+        console.error('[Sender] Frame pump error', e)
+      }
     })()
   }, [stop])
 
