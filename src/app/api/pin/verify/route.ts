@@ -8,7 +8,10 @@ export async function POST(request: NextRequest) {
     const text = await request.text()
     if (!text) return NextResponse.json({ valid: false }, { status: 400 })
     const { pin } = JSON.parse(text)
-    return NextResponse.json({ valid: typeof pin === 'string' && pin === store.pin })
+    // On Vercel each invocation may be a cold container — prefer the env var
+    // which is consistent across all instances over the in-memory store.
+    const expected = process.env.STREAM_PIN ?? store.pin
+    return NextResponse.json({ valid: typeof pin === 'string' && pin === expected })
   } catch {
     return NextResponse.json({ valid: false }, { status: 400 })
   }

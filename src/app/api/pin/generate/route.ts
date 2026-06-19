@@ -13,6 +13,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
+  // On Vercel the PIN is fixed via env var — regenerating in-memory would
+  // only affect this one cold container and break verify on other instances.
+  if (process.env.STREAM_PIN) {
+    return NextResponse.json({ pin: process.env.STREAM_PIN })
+  }
   store.pin = Math.floor(100000 + Math.random() * 900000).toString()
   return NextResponse.json({ pin: store.pin })
 }

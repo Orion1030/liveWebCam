@@ -39,7 +39,10 @@ declare global {
 
 if (!global.__appStore) {
   global.__appStore = {
-    pin: Math.floor(100000 + Math.random() * 900000).toString(),
+    // If STREAM_PIN is set (required on Vercel/serverless where global state is
+    // not shared between invocations), use it. Otherwise generate a random PIN
+    // for the local custom-server mode.
+    pin: process.env.STREAM_PIN ?? Math.floor(100000 + Math.random() * 900000).toString(),
     offer: null,
     answer: null,
     senderCandidates: [],
